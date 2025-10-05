@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Weather Service Demo</title>
+<style>
+  body{font-family:system-ui,Segoe UI,Arial;margin:2rem;max-width:960px}
+  input,button{padding:.6rem;margin:.2rem}
+  pre{background:#f6f8fa;padding:1rem;border-radius:8px;overflow:auto}
+  .row{display:flex;gap:.5rem;flex-wrap:wrap}
+  table{width:100%;border-collapse:collapse;margin-top:.6rem}
+  th,td{border:1px solid #e5e7eb;padding:.5rem;text-align:left}
+  th{background:#f3f4f6}
+  .muted{opacity:.7}
+</style>
+<body>
+  <h1>Weather Service Demo</h1>
+
+  <h3>Add a sensor reading</h3>
+  <div class="row">
+    <input id="temp" type="number" step="0.1" placeholder="temperature °C">
+    <input id="loc" placeholder="location (optional)">
+    <button onclick="addReading()">POST /readings</button>
+  </div>
+
+  <h3>Latest reading</h3>
+  <button onclick="getLatest()">GET /readings-latest</button>
+
+  <h3>All readings</h3>
+  <div class="row">
+    <button onclick="refreshList()">GET /readings</button>
+    <span class="muted">Click “GET /readings” to load or refresh the table below.</span>
+  </div>
+
+  <!-- Editable table -->
+  <div id="list"></div>
+
+  <h3>Weather lookup (via weather-js)</h3>
+  <div class="row">
+    <input id="wloc" placeholder="e.g., Melbourne, AU">
+    <button onclick="getWeather()">GET /weather?location=...</button>
+  </div>
+
+  <h3>Output</h3>
+  <pre id="out">Ready.</pre>
+
+<script>
+const out = (v) => document.getElementById('out').textContent =
+  typeof v === 'string' ? v : JSON.stringify(v, null, 2);
+
+// ---- CRUD calls ----
+async function addReading(){
+  const temperature = Number(document.getElementById('temp').value);
+  if (Number.isNaN(temperature)) return out('Enter a numeric temperature');
+  const location = document.getElementById('loc').value || undefined;
+  const r = await fetch('/readings', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ temperature, location })
+  });
+  const json = await r.json();
+  out(json);
+  refreshList();
+}
+
+async function getLatest(){
+  const r = await fetch('/readings-latest');
+  out(await r.json());
+}
+
+async function getAll(){
+  const r = await fetch('/readings');
+  return r.json();
+}
+
+async function updateReading(id, fields){
+  const r = await fetch('/readings/' + id, {
+    method:'PUT',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(fields)
+  });
+  const json = await r.json();
+  out(json);
+}
+
+async function deleteReading(id){
+  const r = await fetch('/readings/' + id, { method:'DELETE' });
+  const json = await r.json();
+  out(json);
+}
+
+// ---- Weather lookup ----
+async function getWeather(){
+  const q = document.getElementById('wloc').value;
+  if (!q) return out('Enter a location');
+  const r = await fetch('/weather?location=' + encodeURIComponent(q));
+  out(await r.json());
+}
+
+// ---- Table rendering ----
+async function refreshList(){
+  const data = await getAll();
+  const mount = document.getElementById('list');
+  if (!Array.isArray(data) || data.length === 0){
+    mount.innerHTML = '<p class="muted">No readings yet.</p>';
+    return;
+  }
+
+  const rows = data.map(d => {
+    const created = new Date(d.createdAt).toLocaleString();
+    return `
+      <tr data-id="${d._id}">
+        <td><code>${d._id}</code></td>
+        <td><input type="number" step="0.1" value="${d.temperature ?? ''}" style="width:7rem"></td>
+        <td><input type="text" value="${d.location ?? ''}"></td>
+        <td>${created}</td>
+        <td>
+          <button class="btn-update">Update</button>
+          <button class="btn-delete">Delete</button>
+        </td>
+      </tr>`;
+  }).join('');
+
+  mount.innerHTML = `
+    <table>
+      <thead>
+        <tr><th>_id</th><th>temperature (°C)</th><th>location</th><th>createdAt</th><th>actions</th></tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+
+  // Wire up buttons
+  mount.querySelectorAll('.btn-update').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      const tr = e.target.closest('tr');
+      const id = tr.dataset.id;
+      const [tempInput, locInput] = tr.querySelectorAll('input');
+      const temperature = Number(tempInput.value);
+      const location = locInput.value;
+      await updateReading(id, { temperature, location });
+      await refreshList();
+    });
+  });
+
+  mount.querySelectorAll('.btn-delete').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      const tr = e.target.closest('tr');
+      const id = tr.dataset.id;
+      if (!confirm('Delete this reading?')) return;
+      await deleteReading(id);
+      tr.remove();
+    });
+  });
+}
+
+// Auto-load on open
+refreshList();
+</script>
+</body>
+</html>
